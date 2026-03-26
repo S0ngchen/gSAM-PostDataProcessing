@@ -25,12 +25,15 @@ import subprocess
 import time
 import os
 import re
+import sys
 
 if mode == '2D':
     UTILITY = "../../UTIL/2D2nc"
+    PYTHON_UTILITY = "./2D2nc_python.py"
     fileLoc = f"{relativeFileLoc}/OUT_2D/"
 elif mode == '3D':
     UTILITY = "../../UTIL/3D2nc"
+    PYTHON_UTILITY = None
     fileLoc = f"{relativeFileLoc}/OUT_3D/"
 else:
     raise ValueError("mode must be '2D' or '3D'")
@@ -103,11 +106,15 @@ def PrintFormatedList(inList: list):
 
 def _WriteLogHeader(out_f, logId, taskFile):
     # Write A Clear Separator For Each Task In Same Channel Log
+    if OriginalScript:
+        cmdStr = f"{UTILITY} {taskFile}"
+    else:
+        cmdStr = f"{PYTHON_UTILITY} {taskFile}"
     out_f.write("\n")
     out_f.write("=============================================\n")
     out_f.write(f"[CHANNEL {logId}] START: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
     out_f.write(f"[CHANNEL {logId}] FILE : {taskFile}\n")
-    out_f.write(f"[CHANNEL {logId}] CMD  : {UTILITY} {taskFile}\n")
+    out_f.write(f"[CHANNEL {logId}] CMD  : {cmdStr}\n")
     out_f.write("=============================================\n")
     out_f.flush()
 
@@ -134,22 +141,29 @@ def RunParallel(tasks):
         print(f'File {f} Started Converting')
         
         if OriginalScript:
-        # Use the initial script to convert NC files
+            # Use the initial script to convert NC files
             p = subprocess.Popen([UTILITY, f], stdout=out_f, stderr=subprocess.STDOUT)
-            procs.append((p, out_f, f, i))
-
-        # Wait All Tasks And Check Return Code
-        for p, out_f, f, logId in procs:
-            rc = p.wait()
-            # Add Footer To Help Debug
-            _WriteLogFooter(out_f, logId, f, rc)
-            out_f.close()
-            if rc != 0:
-                print(f"[ERROR] Convert Failed (rc={rc}): {f}")
-        
         else:
-        # Use new script to convert NC files
-            pass
+            # Use new script to convert NC files
+            if mode != '2D':
+                out_f.write("[ERROR] Python converter is only implemented for 2D mode.\n")
+                _WriteLogFooter(out_f, i, f, 1)
+                out_f.close()
+                print(f"[ERROR] Python converter only supports 2D mode: {f}")
+                continue
+            p = subprocess.Popen([sys.executable, PYTHON_UTILITY, f], stdout=out_f, stderr=subprocess.STDOUT) # type: ignore
+
+        procs.append((p, out_f, f, i))
+        print(f'File {f} Finished Converting')
+
+    # Wait All Tasks And Check Return Code
+    for p, out_f, f, logId in procs:
+        rc = p.wait()
+        # Add Footer To Help Debug
+        _WriteLogFooter(out_f, logId, f, rc)
+        out_f.close()
+        if rc != 0:
+            print(f"[ERROR] Convert Failed (rc={rc}): {f}")
 
 
 
@@ -183,10 +197,26 @@ def ParallelConvert(convertList: list, channelNumber=parallelChannelNumber):
     return
 
 
+def NCOutCheck():
+    netCDFPac = True
+    scipyPac = True
+    try:
+        import netCDF4
+    except ImportError:
+        netCDFPac = False
+    try:
+        import scipy
+    except ImportError:
+        scipyPac = False
+    if not (scipyPac and netCDFPac):
+        raise ImportError('At Least To Install One Of the Packages: {"scipy", "netCDF4"}')
+
+
 def New2DConvert():
     pass
 
 def Main():
+    NCOutCheck()
     toConvertList = GetConvertList(fileLoc)
     print('Going To Convert The Following Files: ')
     PrintFormatedList(toConvertList)
